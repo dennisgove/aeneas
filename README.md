@@ -22,7 +22,7 @@ The MirrorController exists to control a MagicMirror and supports showing or hid
 
 #### Module Control
 
-Intent `MirrorShowHideModuleIntent` allows the showing or hidding of individual modules. It can be activated with the command `Alexa, ask Aeneas to [show | hide] the [module name | everything]`. For example, `Alexa, ask Aeneas to hide the calendar` would result in the calendar being hidden and `Alexa, ask Aeneas to hide everything` would result in everything being hidden.
+Intent `MirrorShowHideModuleIntent` allows the showing or hiding of individual modules. It can be activated with the command `Alexa, ask Aeneas to [show | hide] the [module name | everything]`. For example, `Alexa, ask Aeneas to hide the calendar` would result in the calendar being hidden and `Alexa, ask Aeneas to hide everything` would result in everything being hidden.
 
 #### On/Off Control
 
@@ -46,4 +46,130 @@ The module ids can be found by calling the MagicMirror endpoint at `http://local
 ### Hue Controller
 
 The HueController is intended to control Hue lights. It is currently not complete or at all usable.
+
+## Integrating with Alexa
+
+To make Alexa call out to Aeneas you will need to create two things. First is the actual Skill on https://developer.amazon.com and the second is an Amazon Web Services Lambda function on https://aws.amazon.com.
+
+This requires an Amazon developer account (free) and the specific steps are still to be filled in. However, the pertinant information is included below. I'll fill out the rest at a later date.
+
+In short, your Alexa/Echo sends a request to the Amazon Skill which sends a request to the AWS Lambda which sends a request to the Aeneas instance which returns a response.
+
+### Amazon Alexa Skill
+
+The creation of an Alexa Skill will provide you with a skill id which is necessary for the Lambda discussed below. In the Configuration tab you will tell it to call out to an AWS Lambda and provide the lambda id.
+
+##### Intent Schema
+```
+{
+  "intents": [
+    {
+      "intent": "AMAZON.StopIntent"
+      
+    },
+    {
+      "intent": "AMAZON.CancelIntent"
+      
+    },
+    {
+      "intent": "MirrorShowHideModuleIntent",
+      "slots":[
+        {
+          "name": "Module",
+          "type": "MODULES"
+        },
+        {
+          "name": "Action",
+          "type": "ACTIONS"
+        }
+      ]
+    },
+    {
+      "intent": "MirrorOnOffIntent",
+      "slots":[
+        {
+          "name": "State",
+          "type": "STATES"
+        }
+      ]
+    }
+  ]
+}
+```
+
+##### Custom Slots
+```
+ACTIONS : show | hide
+MODULES : clock | calendar | nest | weather | forecast | news | everything 
+STATES  : on | off
+```
+
+##### Sample Utterances
+```
+MirrorShowHideModuleIntent {Action} {Module}
+MirrorShowHideModuleIntent to {Action} {Module}
+MirrorShowHideModuleIntent {Action} the {Module}
+MirrorShowHideModuleIntent to {Action} the {Module}
+MirrorOnOffIntent {State}
+MirrorOnOffIntent mirror {State}
+```
+
+### Amazon Web Services Lambda
+
+This makes use of a Lambda in Amazon Web Services to send web requests down to the running Aeneas instance.
+
+```
+var http = require('http');
+var URLParser = require('url');
+ 
+exports.handler = function (json, context) {
+    try {
+        // A list of URL's to call for each applicationId
+        var handlers = {
+            'appId':'url',
+            '[your-alexa-skill-id]':'[your-ip-or-some-url-to-your-ip]:[aeneas-port]/aeneas'
+        };
+        
+        // Look up the url to call based on the appId
+        var url = handlers[json.session.application.applicationId];
+        if (!url) { context.fail("No url found for application id"); }
+        var parts = URLParser.parse(url);
+        
+        var post_data = JSON.stringify(json);
+        
+        // An object of options to indicate where to post to
+        var post_options = {
+            host: parts.hostname,
+            auth: parts.auth,
+            port: (parts.port || 80),
+            path: parts.path,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': post_data.length
+            }
+        };
+        // Initiate the request to the HTTP endpoint
+        var req = http.request(post_options,function(res) {
+            var body = "";
+            // Data may be chunked
+            res.on('data', function(chunk) {
+                body += chunk;
+            });
+            res.on('end', function() {
+                // When data is done, finish the request
+                context.succeed(JSON.parse(body));
+            });
+        });
+        req.on('error', function(e) {
+            context.fail('problem with request: ' + e.message);
+        });
+        // Send the JSON data
+        req.write(post_data);
+        req.end();        
+    } catch (e) {
+        context.fail("Exception: " + e);
+    }
+};
+```
 
